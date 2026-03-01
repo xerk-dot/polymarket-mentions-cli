@@ -30,6 +30,8 @@ pub(crate) struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Analytics for mentions markets
+    Analytics(commands::analytics::AnalyticsArgs),
     /// Guided first-time setup (wallet, proxy, approvals)
     Setup,
     /// Launch interactive shell
@@ -89,6 +91,14 @@ async fn main() -> ExitCode {
 #[allow(clippy::too_many_lines)]
 pub(crate) async fn run(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
+        Commands::Analytics(args) => {
+            commands::analytics::execute(
+                &polymarket_client_sdk::gamma::Client::default(),
+                args,
+                cli.output,
+            )
+            .await
+        }
         Commands::Setup => commands::setup::execute(),
         Commands::Shell => {
             Box::pin(shell::run_shell()).await;
