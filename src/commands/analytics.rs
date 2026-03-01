@@ -13,7 +13,7 @@ const SEARCH_PATTERNS: &[&str] = &[
     "post \"",
 ];
 
-// Filter: mentions markets - "Will X say/post Y" or "What will be said"
+// Filter: mentions markets - "Will X say/post Y" or "Will Y be said"
 fn is_mentions_market(question: &str) -> bool {
     let q = question.to_lowercase();
 
@@ -22,23 +22,15 @@ fn is_mentions_market(question: &str) -> bool {
         return false;
     }
 
-    // Find first quote position
-    let quote_pos = match q.find("\"") {
-        Some(pos) => pos,
-        None => return false,
-    };
+    // Pattern 1: "Will X say/post \"Y\"" - verb before quote
+    // Pattern 2: "Will \"Y\" be said" - quote before verb
 
-    // Check for "say", "post", or "said" BEFORE the quote
-    let verbs = [" say ", " post ", " said "];
-    for verb in verbs {
-        if let Some(verb_pos) = q.find(verb) {
-            if verb_pos < quote_pos {
-                return true;
-            }
-        }
-    }
+    let has_say = q.contains(" say ");
+    let has_post = q.contains(" post ");
+    let has_be_said = q.contains(" be said");
 
-    false
+    // Accept if it has any of these verb patterns
+    has_say || has_post || has_be_said
 }
 
 #[derive(Args)]
@@ -64,7 +56,9 @@ struct MentionsNoResult {
     resolved_no: usize,
     still_open: usize,
     no_percentage: f64,
+    markets_resolved_yes: Vec<MarketSummary>,
     markets_resolved_no: Vec<MarketSummary>,
+    markets_open: Vec<MarketSummary>,
 }
 
 #[derive(serde::Serialize)]
@@ -122,11 +116,20 @@ async fn mentions_no(client: &gamma::Client, limit: i32, output: OutputFormat) -
     let mut resolved_yes = 0;
     let mut resolved_no = 0;
     let mut still_open = 0;
+    let mut yes_markets = Vec::new();
     let mut no_markets = Vec::new();
+    let mut open_markets = Vec::new();
 
     for market in &all_markets {
+        let summary = MarketSummary {
+            question: market.question.clone().unwrap_or_default(),
+            volume: market.volume.map(|v| v.to_string()).unwrap_or_default(),
+            closed_time: market.closed_time.clone(),
+        };
+
         if !market.closed.unwrap_or(false) {
             still_open += 1;
+            open_markets.push(summary);
             continue;
         }
 
@@ -143,21 +146,20 @@ async fn mentions_no(client: &gamma::Client, limit: i32, output: OutputFormat) -
 
                     if no_price > 0.99 {
                         resolved_no += 1;
-                        no_markets.push(MarketSummary {
-                            question: market.question.clone().unwrap_or_default(),
-                            volume: market.volume.map(|v| v.to_string()).unwrap_or_default(),
-                            closed_time: market.closed_time.clone(),
-                        });
+                        no_markets.push(summary);
                     } else if yes_price > 0.99 {
                         resolved_yes += 1;
+                        yes_markets.push(summary);
                     } else {
                         still_open += 1;
+                        open_markets.push(summary);
                     }
                     continue;
                 }
             }
         }
         still_open += 1;
+        open_markets.push(summary);
     }
 
     let total_resolved = resolved_yes + resolved_no;
@@ -173,7 +175,9 @@ async fn mentions_no(client: &gamma::Client, limit: i32, output: OutputFormat) -
         resolved_no,
         still_open,
         no_percentage,
+        markets_resolved_yes: yes_markets,
         markets_resolved_no: no_markets,
+        markets_open: open_markets,
     };
 
     match output {
